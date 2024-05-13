@@ -202,6 +202,46 @@ public class EnumerableTest
     }
 
     [Fact]
+    public void ReadOnlyCollectionToIReadOnlyCollectionOfDifferentTypes()
+    {
+        var source = TestSourceBuilder.Mapping("IReadOnlyCollection<int>", "IReadOnlyCollection<long>");
+        TestHelper
+            .GenerateMapper(source)
+            .Should()
+            .HaveSingleMethodBody(
+                """
+                var target = new long[source.Count];
+                var i = 0;
+                foreach (var item in source)
+                {
+                    target[i] = (long)item;
+                    i++;
+                }
+                return target;
+                """
+            );
+    }
+
+    [Fact]
+    public Task ReadOnlyCollectionToIReadOnlyCollectionOfGeneric()
+    {
+        var source = TestSourceBuilder.MapperWithBodyAndTypes(
+            """
+            public partial IReadOnlyCollection<T> MapItems<T>(IReadOnlyCollection<A> source) where T : class;
+            public partial T MapItem<T>(A source) where T : class;
+
+            public partial B MapToB(A source);
+            """,
+            """
+            public record A(string Value);
+            public record B(string Value);
+            """
+        );
+
+        return TestHelper.VerifyGenerator(source);
+    }
+
+    [Fact]
     public void ReadOnlyCollectionToArrayOfDifferentTypes()
     {
         var source = TestSourceBuilder.Mapping("IReadOnlyCollection<int>", "string[]");
