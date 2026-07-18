@@ -41,7 +41,7 @@ public class QueryableProjectionEnumTest
             .Should()
             .HaveDiagnostic(
                 DiagnosticDescriptors.EnumMappingNotSupportedInProjectionMappings,
-                "The enum mapping strategy ByName, ByValueCheckDefined, explicit enum mappings and ignored enum values cannot be used in projection mappings to map from C to D, consider applying [MapperNoExpressionInlining] to the mapping method or Mapper(NoExpressionInlining = true) to the containing mapper"
+                "The enum mapping strategy ByName, ByValueCheckDefined, explicit enum mappings and ignored enum values cannot be used in projection mappings to map from C to D, consider applying [MapperNoExpressionInlining] to the mapping method or NoExpressionInlining = true to the referencing UseStaticMapper/UseMapper attribute"
             )
             .HaveDiagnostic(DiagnosticDescriptors.CouldNotMapMember, "Could not map member A.Value of type C to B.Value of type D")
             .HaveDiagnostic(
@@ -80,13 +80,13 @@ public class QueryableProjectionEnumTest
             .Should()
             .HaveDiagnostic(
                 DiagnosticDescriptors.EnumMappingNotSupportedInProjectionMappings,
-                "The enum mapping strategy ByName, ByValueCheckDefined, explicit enum mappings and ignored enum values cannot be used in projection mappings to map from C to D, consider applying [MapperNoExpressionInlining] to the mapping method or Mapper(NoExpressionInlining = true) to the containing mapper"
+                "The enum mapping strategy ByName, ByValueCheckDefined, explicit enum mappings and ignored enum values cannot be used in projection mappings to map from C to D, consider applying [MapperNoExpressionInlining] to the mapping method or NoExpressionInlining = true to the referencing UseStaticMapper/UseMapper attribute"
             )
             .HaveAssertedAllDiagnostics();
     }
 
     [Fact]
-    public void EnumToAnotherEnumByNameWithMapperNoExpressionInliningShouldNotInline()
+    public void EnumToAnotherEnumByNameWithMethodNoExpressionInliningShouldNotInline()
     {
         var source = TestSourceBuilder.CSharp(
             """
@@ -101,11 +101,12 @@ public class QueryableProjectionEnumTest
 
             public enum D { Value1, Value2 }
 
-            [Mapper(EnumMappingStrategy = EnumMappingStrategy.ByName, NoExpressionInlining = true)]
+            [Mapper(EnumMappingStrategy = EnumMappingStrategy.ByName)]
             public static partial class Mapper
             {
                 public static partial IQueryable<B> Map(IQueryable<A> q);
 
+                [MapperNoExpressionInlining]
                 public static partial D MapEnum(C src);
             }
             """
