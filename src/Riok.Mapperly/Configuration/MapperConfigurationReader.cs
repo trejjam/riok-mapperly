@@ -13,13 +13,11 @@ namespace Riok.Mapperly.Configuration;
 public class MapperConfigurationReader
 {
     private readonly Dictionary<MappingConfigurationReference, MappingConfiguration> _resolvedConfigurations = new();
-    private readonly Dictionary<ISymbol, MapperAttribute> _resolvedMapperConfigurations = new(SymbolEqualityComparer.Default);
     private readonly AttributeDataAccessor _dataAccessor;
     private readonly MappingCollection _mappings;
     private readonly GenericTypeChecker _genericTypeChecker;
     private readonly DiagnosticCollection _diagnostics;
     private readonly WellKnownTypes _types;
-    private readonly MapperConfiguration _defaultMapperConfiguration;
 
     public MapperConfigurationReader(
         AttributeDataAccessor dataAccessor,
@@ -37,9 +35,9 @@ public class MapperConfigurationReader
         _genericTypeChecker = genericTypeChecker;
         _diagnostics = diagnostics;
         _types = types;
-        _defaultMapperConfiguration = defaultMapperConfiguration;
 
-        var mapper = BuildMapperConfiguration(mapperSymbol);
+        var mapperConfiguration = _dataAccessor.AccessSingle<MapperAttribute, MapperConfiguration>(mapperSymbol);
+        var mapper = MapperConfigurationMerger.MergeToAttribute(mapperConfiguration, defaultMapperConfiguration);
 
         MapperConfiguration = new MappingConfiguration(
             mapper,
@@ -62,25 +60,6 @@ public class MapperConfigurationReader
     }
 
     public MappingConfiguration MapperConfiguration { get; }
-
-    /// <summary>
-    /// Builds the effective <see cref="MapperAttribute"/> configuration for a mapper symbol
-    /// by merging its <see cref="MapperAttribute"/> with the default mapper configuration
-    /// (<see cref="MapperDefaultsAttribute"/> and MSBuild options).
-    /// </summary>
-    public MapperAttribute BuildMapperConfiguration(ISymbol mapperSymbol)
-    {
-        if (_resolvedMapperConfigurations.TryGetValue(mapperSymbol, out var mapper))
-            return mapper;
-
-        var mapperConfiguration =
-            _dataAccessor.AccessFirstOrDefault<MapperAttribute, MapperConfiguration>(mapperSymbol) ?? new MapperConfiguration();
-
-        mapper = MapperConfigurationMerger.MergeToAttribute(mapperConfiguration, _defaultMapperConfiguration);
-        _resolvedMapperConfigurations[mapperSymbol] = mapper;
-
-        return mapper;
-    }
 
     public MappingConfiguration BuildFor(MappingConfigurationReference reference, bool supportsDeepCloning)
     {

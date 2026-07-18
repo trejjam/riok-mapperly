@@ -138,7 +138,6 @@ namespace Riok.Mapperly.Abstractions
         public Riok.Mapperly.Abstractions.IgnoreObsoleteMembersStrategy IgnoreObsoleteMembersStrategy { get; set; }
         public Riok.Mapperly.Abstractions.MemberVisibility IncludedConstructors { get; set; }
         public Riok.Mapperly.Abstractions.MemberVisibility IncludedMembers { get; set; }
-        public bool NoExpressionInlining { get; set; }
         public bool PreferParameterlessConstructors { get; set; }
         public Riok.Mapperly.Abstractions.PropertyNameMappingStrategy PropertyNameMappingStrategy { get; set; }
         public Riok.Mapperly.Abstractions.RequiredMappingStrategy RequiredEnumMappingStrategy { get; set; }
@@ -308,18 +307,21 @@ namespace Riok.Mapperly.Abstractions
     public sealed class UseMapperAttribute : System.Attribute
     {
         public UseMapperAttribute() { }
+        public bool NoExpressionInlining { get; set; }
     }
     [System.AttributeUsage(System.AttributeTargets.Assembly | System.AttributeTargets.Class, AllowMultiple=true)]
     [System.Diagnostics.Conditional("MAPPERLY_ABSTRACTIONS_SCOPE_RUNTIME")]
     public sealed class UseStaticMapperAttribute : System.Attribute
     {
         public UseStaticMapperAttribute(System.Type mapperType) { }
+        public bool NoExpressionInlining { get; set; }
     }
     [System.AttributeUsage(System.AttributeTargets.Assembly | System.AttributeTargets.Class, AllowMultiple=true)]
     [System.Diagnostics.Conditional("MAPPERLY_ABSTRACTIONS_SCOPE_RUNTIME")]
     public sealed class UseStaticMapperAttribute<T> : System.Attribute
     {
         public UseStaticMapperAttribute() { }
+        public bool NoExpressionInlining { get; set; }
     }
     [System.AttributeUsage(System.AttributeTargets.Method)]
     [System.Diagnostics.Conditional("MAPPERLY_ABSTRACTIONS_SCOPE_RUNTIME")]

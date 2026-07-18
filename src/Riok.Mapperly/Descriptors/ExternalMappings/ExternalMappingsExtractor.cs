@@ -42,7 +42,8 @@ internal static class ExternalMappingsExtractor
                 x.MapperType,
                 receiver: x.MapperType.FullyQualifiedIdentifierName(),
                 isStatic: true,
-                isExternal: true
+                isExternal: true,
+                noExpressionInlining: x.NoExpressionInlining
             )
         );
         return staticExternalMappers;
@@ -52,8 +53,9 @@ internal static class ExternalMappingsExtractor
     {
         return ctx
             .SymbolAccessor.GetAllMembers(mapperSymbol)
-            .Where(x => ctx.AttributeAccessor.HasAttribute<UseMapperAttribute>(x))
-            .SelectMany(x => ValidateAndExtractExternalInstanceMappings(ctx, x));
+            .Select(x => (Member: x, Attribute: ctx.AttributeAccessor.AccessFirstOrDefault<UseMapperAttribute>(x)))
+            .Where(x => x.Attribute != null)
+            .SelectMany(x => ValidateAndExtractExternalInstanceMappings(ctx, x.Member, x.Attribute!.NoExpressionInlining));
     }
 
     public static IEnumerable<(string Name, IUserMapping Mapping)> ExtractExternalNamedMappings(
@@ -78,7 +80,11 @@ internal static class ExternalMappingsExtractor
                 .WhereNotNull();
     }
 
-    private static IEnumerable<IUserMapping> ValidateAndExtractExternalInstanceMappings(SimpleMappingBuilderContext ctx, ISymbol symbol)
+    private static IEnumerable<IUserMapping> ValidateAndExtractExternalInstanceMappings(
+        SimpleMappingBuilderContext ctx,
+        ISymbol symbol,
+        bool noExpressionInlining
+    )
     {
         var (name, type, nullableAnnotation) = symbol switch
         {
@@ -91,7 +97,14 @@ internal static class ExternalMappingsExtractor
             return [];
 
         if (nullableAnnotation != NullableAnnotation.Annotated)
-            return UserMethodMappingExtractor.ExtractUserImplementedMappings(ctx, type, name, isStatic: false, isExternal: true);
+            return UserMethodMappingExtractor.ExtractUserImplementedMappings(
+                ctx,
+                type,
+                name,
+                isStatic: false,
+                isExternal: true,
+                noExpressionInlining
+            );
 
         ctx.ReportDiagnostic(DiagnosticDescriptors.ExternalMapperMemberCannotBeNullable, symbol, symbol.ToDisplayString());
         return [];
