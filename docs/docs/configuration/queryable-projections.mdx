@@ -129,7 +129,8 @@ In some cases, this inlining can cause issues — for example, when enum mapping
 produce false diagnostics in expression context.
 
 You can prevent inlining of specific methods using the `MapperNoExpressionInlining` attribute,
-or prevent inlining of all methods in a mapper using the `NoExpressionInlining` property on the `Mapper` attribute.
+or prevent inlining of all methods of a referenced mapper using the `NoExpressionInlining` property
+on the `UseStaticMapper` / `UseMapper` attribute.
 
 ### Per-method opt-out
 
@@ -152,15 +153,23 @@ public static partial class Mapper
 }
 ```
 
-### Per-mapper opt-out
+### Per-reference opt-out
 
 ```csharp
-// highlight-start
-[Mapper(EnumMappingStrategy = EnumMappingStrategy.ByName, NoExpressionInlining = true)]
-// highlight-end
+[Mapper(EnumMappingStrategy = EnumMappingStrategy.ByName)]
 public static partial class EnumMapper
 {
     public static partial TargetStatus MapToStatus(this SourceStatus source);
+}
+
+[Mapper]
+// highlight-start
+[UseStaticMapper(typeof(EnumMapper), NoExpressionInlining = true)]
+// highlight-end
+public static partial class Mapper
+{
+    public static partial IQueryable<CarDto> ProjectToDto(this IQueryable<Car> q);
+    public static partial CarDto MapToDto(this Car car);
 }
 ```
 
