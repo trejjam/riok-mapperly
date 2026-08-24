@@ -31,6 +31,36 @@ public class UseMapperTest
     }
 
     [Fact]
+    public void ProjectionWithUseMapperNoExpressionInliningShouldNotInline()
+    {
+        var source = TestSourceBuilder.MapperWithBodyAndTypes(
+            """
+            [UseMapper(NoExpressionInlining = true)]
+            private readonly OtherMapper _otherMapper = new();
+            private partial System.Linq.IQueryable<B> Project(System.Linq.IQueryable<A> source);
+            """,
+            "record A(AExternal Value);",
+            "record B(BExternal Value);",
+            "record AExternal();",
+            "record BExternal();",
+            "class OtherMapper { public BExternal ToBExternal(AExternal source) => new BExternal(); }"
+        );
+
+        var generated = TestHelper.GenerateMapper(source);
+
+        generated.Diagnostics.ShouldNotContain(x => x.Descriptor.Id == DiagnosticDescriptors.QueryableProjectionMappingCannotInline.Id);
+        generated
+            .Should()
+            .HaveSingleMethodBody(
+                """
+                #nullable disable
+                        return global::System.Linq.Queryable.Select(source, x => new global::B(_otherMapper.ToBExternal(x.Value)));
+                #nullable enable
+                """
+            );
+    }
+
+    [Fact]
     public void UsePropertyMapper()
     {
         var source = TestSourceBuilder.MapperWithBodyAndTypes(

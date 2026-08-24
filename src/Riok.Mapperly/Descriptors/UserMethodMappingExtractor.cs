@@ -99,7 +99,8 @@ public static class UserMethodMappingExtractor
         ITypeSymbol type,
         string? receiver,
         bool isStatic,
-        bool isExternal
+        bool isExternal,
+        bool noExpressionInlining = false
     )
     {
         // Ignore the mapper type itself.
@@ -112,7 +113,7 @@ public static class UserMethodMappingExtractor
             .SymbolAccessor.GetAllMethods(type)
             .Concat(type.AllInterfaces.SelectMany(ctx.SymbolAccessor.GetAllMethods))
             .Distinct(SymbolTypeEqualityComparer.MethodDefault);
-        return BuildUserImplementedMappings(ctx, methods, receiver, isStatic, isExternal);
+        return BuildUserImplementedMappings(ctx, methods, receiver, isStatic, isExternal, noExpressionInlining: noExpressionInlining);
     }
 
     private static IEnumerable<IUserMapping> BuildUserImplementedMappings(
@@ -122,7 +123,8 @@ public static class UserMethodMappingExtractor
         bool isStatic,
         bool isExternal,
         bool? isDefault = null,
-        bool requireAttribute = true
+        bool requireAttribute = true,
+        bool noExpressionInlining = false
     )
     {
         foreach (var method in methods)
@@ -134,7 +136,7 @@ public static class UserMethodMappingExtractor
             // but still treated as user implemented methods,
             // since the user should provide an implementation elsewhere.
             // This is the case if a partial mapper class is extended.
-            var mapping = BuildUserImplementedMapping(ctx, method, receiver, true, isStatic, isExternal, isDefault);
+            var mapping = BuildUserImplementedMapping(ctx, method, receiver, true, isStatic, isExternal, isDefault, noExpressionInlining);
             if (mapping != null)
                 yield return mapping;
         }
@@ -163,7 +165,8 @@ public static class UserMethodMappingExtractor
         bool allowPartial,
         bool isStatic,
         bool isExternal,
-        bool? isDefault = null
+        bool? isDefault = null,
+        bool useSiteNoExpressionInlining = false
     )
     {
         var userMappingConfig = GetUserMappingConfig(ctx, method, out var hasAttribute);
@@ -189,7 +192,7 @@ public static class UserMethodMappingExtractor
             return null;
         }
 
-        var noExpressionInlining = GetNoExpressionInlining(ctx, method, isExternal);
+        var noExpressionInlining = GetNoExpressionInlining(ctx, method, useSiteNoExpressionInlining);
 
         // Generic user-implemented methods are stored as templates
         // that are matched against concrete type pairs during mapping resolution.
@@ -318,7 +321,7 @@ public static class UserMethodMappingExtractor
             return null;
         }
 
-        var noExpressionInlining = GetNoExpressionInlining(ctx, methodSymbol, isExternal: false);
+        var noExpressionInlining = GetNoExpressionInlining(ctx, methodSymbol, useSiteNoExpressionInlining: false);
 
         if (TryBuildRuntimeTargetTypeMapping(ctx, methodSymbol, noExpressionInlining) is { } userMapping)
             return userMapping;
@@ -514,18 +517,8 @@ public static class UserMethodMappingExtractor
         return userMappingAttr ?? new UserMappingConfiguration();
     }
 
-    private static bool GetNoExpressionInlining(SimpleMappingBuilderContext ctx, IMethodSymbol method, bool isExternal)
-    {
-        if (ctx.SymbolAccessor.HasAttribute<MapperNoExpressionInliningAttribute>(method))
-            return true;
-
-        if (!isExternal)
-            return ctx.Configuration.Mapper.NoExpressionInlining;
-
-        // the configuration of external mappers is not merged into ctx.Configuration,
-        // build it from the MapperAttribute of the containing type and the default configuration
-        return ctx.BuildMapperConfiguration(method.ContainingType).NoExpressionInlining;
-    }
+    private static bool GetNoExpressionInlining(SimpleMappingBuilderContext ctx, IMethodSymbol method, bool useSiteNoExpressionInlining) =>
+        useSiteNoExpressionInlining || ctx.SymbolAccessor.HasAttribute<MapperNoExpressionInliningAttribute>(method);
 
     private static IEnumerable<T> ExtractNamedUserImplementedMappings<T>(
         SimpleMappingBuilderContext ctx,
