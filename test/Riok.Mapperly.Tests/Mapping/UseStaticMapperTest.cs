@@ -773,4 +773,331 @@ public class UseStaticMapperTest
             .Should()
             .HaveDiagnostic(DiagnosticDescriptors.QueryableProjectionMappingCannotInline);
     }
+
+    [Fact]
+    public void ProjectionWithUseStaticMapperShouldRebuildWithEnumConfigurationOfImportedMapper()
+    {
+        var source = TestSourceBuilder.CSharp(
+            """
+            using Riok.Mapperly.Abstractions;
+            using System.Linq;
+
+            class A { public C Value { get; set; } }
+            class B { public D Value { get; set; } }
+            enum C { Value1 = 1, Value2 = 2 }
+            enum D { Value2 = 1, Value1 = 2 }
+
+            [Mapper(EnumMappingStrategy = EnumMappingStrategy.ByName)]
+            public static partial class EnumMapper
+            {
+                public static partial D MapEnum(C source);
+            }
+
+            [Mapper]
+            [UseStaticMapper(typeof(EnumMapper))]
+            public static partial class Mapper
+            {
+                public static partial IQueryable<B> Project(IQueryable<A> source);
+            }
+            """
+        );
+
+        TestHelper
+            .GenerateMapper(source, TestHelperOptions.AllowDiagnostics)
+            .Should()
+            .HaveDiagnostic(
+                DiagnosticDescriptors.EnumMappingNotSupportedInProjectionMappings,
+                "The enum mapping strategy ByName, ByValueCheckDefined, explicit enum mappings and ignored enum values cannot be used in projection mappings to map from C to D"
+            )
+            .HaveAssertedAllDiagnostics();
+    }
+
+    [Fact]
+    public void ProjectionWithUseStaticMapperShouldPreferMethodConfigurationOverImportedMapperConfiguration()
+    {
+        var source = TestSourceBuilder.CSharp(
+            """
+            using Riok.Mapperly.Abstractions;
+            using System.Linq;
+
+            class A { public C Value { get; set; } }
+            class B { public D Value { get; set; } }
+            enum C { Value1 = 1, Value2 = 2 }
+            enum D { Value1 = 1, Value2 = 2 }
+
+            [Mapper(EnumMappingStrategy = EnumMappingStrategy.ByName)]
+            public static partial class EnumMapper
+            {
+                [MapEnum(EnumMappingStrategy.ByValue)]
+                public static partial D MapEnum(C source);
+            }
+
+            [Mapper]
+            [UseStaticMapper(typeof(EnumMapper))]
+            public static partial class Mapper
+            {
+                public static partial IQueryable<B> Project(IQueryable<A> source);
+            }
+            """
+        );
+
+        TestHelper
+            .GenerateMapper(source)
+            .Should()
+            .HaveMethodBody(
+                "Project",
+                """
+                #nullable disable
+                        return global::System.Linq.Queryable.Select(
+                            source,
+                            x => new global::B()
+                            {
+                                Value = (global::D)x.Value,
+                            }
+                        );
+                #nullable enable
+                """
+            );
+    }
+
+    [Fact]
+    public void ProjectionWithUseStaticMapperShouldRebuildWithPropertyNameMappingStrategyOfImportedMapper()
+    {
+        var source = TestSourceBuilder.CSharp(
+            """
+            using Riok.Mapperly.Abstractions;
+            using System.Linq;
+
+            class A { public C Nested { get; set; } }
+            class B { public D Nested { get; set; } }
+            class C { public int value { get; set; } }
+            class D { public int Value { get; set; } }
+
+            [Mapper(PropertyNameMappingStrategy = PropertyNameMappingStrategy.CaseInsensitive)]
+            public static partial class NestedMapper
+            {
+                public static partial D MapNested(C source);
+            }
+
+            [Mapper]
+            [UseStaticMapper(typeof(NestedMapper))]
+            public static partial class Mapper
+            {
+                public static partial IQueryable<B> Project(IQueryable<A> source);
+            }
+            """
+        );
+
+        TestHelper
+            .GenerateMapper(source)
+            .Should()
+            .HaveMethodBody(
+                "Project",
+                """
+                #nullable disable
+                        return global::System.Linq.Queryable.Select(
+                            source,
+                            x => new global::B()
+                            {
+                                Nested = new global::D()
+                                {
+                                    Value = x.Nested.value,
+                                },
+                            }
+                        );
+                #nullable enable
+                """
+            );
+    }
+
+    [Fact]
+    public void ProjectionWithUseStaticMapperShouldRebuildWithMapperDefaultsOfImportedMapper()
+    {
+        var source = TestSourceBuilder.CSharp(
+            """
+            using Riok.Mapperly.Abstractions;
+            using System.Linq;
+
+            [assembly: MapperDefaults(PropertyNameMappingStrategy = PropertyNameMappingStrategy.CaseInsensitive)]
+
+            class A { public C Nested { get; set; } }
+            class B { public D Nested { get; set; } }
+            class C { public int value { get; set; } }
+            class D { public int Value { get; set; } }
+
+            [Mapper]
+            public static partial class NestedMapper
+            {
+                public static partial D MapNested(C source);
+            }
+
+            [Mapper(PropertyNameMappingStrategy = PropertyNameMappingStrategy.CaseSensitive)]
+            [UseStaticMapper(typeof(NestedMapper))]
+            public static partial class Mapper
+            {
+                public static partial IQueryable<B> Project(IQueryable<A> source);
+            }
+            """
+        );
+
+        TestHelper
+            .GenerateMapper(source)
+            .Should()
+            .HaveMethodBody(
+                "Project",
+                """
+                #nullable disable
+                        return global::System.Linq.Queryable.Select(
+                            source,
+                            x => new global::B()
+                            {
+                                Nested = new global::D()
+                                {
+                                    Value = x.Nested.value,
+                                },
+                            }
+                        );
+                #nullable enable
+                """
+            );
+    }
+
+    /// <summary>
+    /// This tests a situation when your IDE runs the source generator (references are other syntax trees).
+    /// For compiled assemblies the Mapperly attributes are not available (conditional attributes).
+    /// </summary>
+    [Fact]
+    public void ProjectionWithUseStaticMapperShouldRebuildWithMapperDefaultsOfImportedMapperAssembly()
+    {
+        var testDependencySource = TestSourceBuilder.SyntaxTree(
+            """
+            using System.CodeDom.Compiler;
+            using Riok.Mapperly.Abstractions;
+
+            [assembly: MapperDefaults(PropertyNameMappingStrategy = PropertyNameMappingStrategy.CaseInsensitive)]
+
+            namespace Riok.Mapperly.TestDependency
+            {
+                public class C { public int value { get; set; } }
+                public class D { public int Value { get; set; } }
+
+                [Mapper]
+                public static partial class NestedMapper
+                {
+                    [GeneratedCode("Riok.Mapperly", "0.0.1.0")]
+                    public static D MapNested(C source)
+                    {
+                        var target = new D();
+                        target.Value = source.value;
+                        return target;
+                    }
+                }
+            }
+            """
+        );
+
+        using var testDependencyAssembly = TestHelper.BuildAssembly(
+            "Riok.Mapperly.TestDependency",
+            asCompilationReference: true,
+            testDependencySource
+        );
+
+        var source = TestSourceBuilder.CSharp(
+            """
+            using System.Linq;
+            using Riok.Mapperly.Abstractions;
+            using Riok.Mapperly.TestDependency;
+
+            class A { public C Nested { get; set; } }
+            class B { public D Nested { get; set; } }
+
+            [Mapper(PropertyNameMappingStrategy = PropertyNameMappingStrategy.CaseSensitive)]
+            [UseStaticMapper(typeof(NestedMapper))]
+            public static partial class Mapper
+            {
+                public static partial IQueryable<B> Project(IQueryable<A> source);
+            }
+            """
+        );
+
+        TestHelper
+            .GenerateMapper(source, additionalAssemblies: [testDependencyAssembly])
+            .Should()
+            .HaveMethodBody(
+                "Project",
+                """
+                #nullable disable
+                        return global::System.Linq.Queryable.Select(
+                            source,
+                            x => new global::B()
+                            {
+                                Nested = new global::Riok.Mapperly.TestDependency.D()
+                                {
+                                    Value = x.Nested.value,
+                                },
+                            }
+                        );
+                #nullable enable
+                """
+            );
+    }
+
+    [Fact]
+    public void ProjectionWithUseStaticMapperShouldRebuildNonMapperClassWithOwnConfiguration()
+    {
+        var source = TestSourceBuilder.CSharp(
+            """
+            using Riok.Mapperly.Abstractions;
+            using System.Linq;
+
+            class A { public C Nested { get; set; } }
+            class B { public D Nested { get; set; } }
+            class C { public int value { get; set; } }
+            class D { public int Value { get; set; } }
+
+            public static partial class NestedMapper
+            {
+                public static partial D MapNested(C source);
+            }
+
+            public static partial class NestedMapper
+            {
+                public static partial D MapNested(C source)
+                {
+                    var target = new D();
+                    target.Value = source.value;
+                    return target;
+                }
+            }
+
+            [Mapper(PropertyNameMappingStrategy = PropertyNameMappingStrategy.CaseInsensitive)]
+            [UseStaticMapper(typeof(NestedMapper))]
+            public static partial class Mapper
+            {
+                public static partial IQueryable<B> Project(IQueryable<A> source);
+            }
+            """
+        );
+
+        TestHelper
+            .GenerateMapper(source)
+            .Should()
+            .HaveMethodBody(
+                "Project",
+                """
+                #nullable disable
+                        return global::System.Linq.Queryable.Select(
+                            source,
+                            x => new global::B()
+                            {
+                                Nested = new global::D()
+                                {
+                                    Value = x.Nested.value,
+                                },
+                            }
+                        );
+                #nullable enable
+                """
+            );
+    }
 }

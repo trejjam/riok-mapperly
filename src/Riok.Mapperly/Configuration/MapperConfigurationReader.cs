@@ -13,11 +13,15 @@ namespace Riok.Mapperly.Configuration;
 public class MapperConfigurationReader
 {
     private readonly Dictionary<MappingConfigurationReference, MappingConfiguration> _resolvedConfigurations = new();
+    private readonly Dictionary<INamedTypeSymbol, MappingConfiguration> _mapperConfigurations = new(SymbolEqualityComparer.Default);
     private readonly AttributeDataAccessor _dataAccessor;
     private readonly MappingCollection _mappings;
     private readonly GenericTypeChecker _genericTypeChecker;
     private readonly DiagnosticCollection _diagnostics;
     private readonly WellKnownTypes _types;
+    private readonly ISymbol _mapperSymbol;
+    private readonly MapperConfiguration _defaultMapperConfiguration;
+    private readonly SupportedFeatures _supportedFeatures;
 
     public MapperConfigurationReader(
         AttributeDataAccessor dataAccessor,
@@ -35,28 +39,11 @@ public class MapperConfigurationReader
         _genericTypeChecker = genericTypeChecker;
         _diagnostics = diagnostics;
         _types = types;
+        _mapperSymbol = mapperSymbol;
+        _defaultMapperConfiguration = defaultMapperConfiguration;
+        _supportedFeatures = supportedFeatures;
 
-        var mapperConfiguration = _dataAccessor.AccessSingle<MapperAttribute, MapperConfiguration>(mapperSymbol);
-        var mapper = MapperConfigurationMerger.MergeToAttribute(mapperConfiguration, defaultMapperConfiguration);
-
-        MapperConfiguration = new MappingConfiguration(
-            mapper,
-            new EnumMappingConfiguration(
-                mapper.EnumMappingStrategy,
-                mapper.EnumMappingIgnoreCase,
-                null,
-                [],
-                [],
-                [],
-                mapper.RequiredEnumMappingStrategy,
-                mapper.EnumNamingStrategy
-            ),
-            new MembersMappingConfiguration([], [], [], [], [], mapper.IgnoreObsoleteMembersStrategy, mapper.RequiredMappingStrategy),
-            [],
-            mapper.UseDeepCloning,
-            mapper.StackCloningStrategy,
-            supportedFeatures
-        );
+        MapperConfiguration = BuildMapperConfiguration(mapperSymbol, defaultMapperConfiguration);
     }
 
     public MappingConfiguration MapperConfiguration { get; }
@@ -80,21 +67,75 @@ public class MapperConfigurationReader
         if (reference.Method == null)
             return supportsDeepCloning ? MapperConfiguration : MapperConfiguration with { UseDeepCloning = false };
 
-        var enumConfig = BuildEnumConfig(reference);
-        var membersConfig = BuildMembersConfig(reference);
+        var mapperConfiguration = MapperConfigurationFor(reference.Method);
+        var enumConfig = BuildEnumConfig(reference, mapperConfiguration);
+        var membersConfig = BuildMembersConfig(reference, mapperConfiguration);
         var derivedTypesConfig = BuildDerivedTypeConfigs(reference.Method);
         var configuration = new MappingConfiguration(
-            MapperConfiguration.Mapper,
+            mapperConfiguration.Mapper,
             enumConfig,
             membersConfig,
             derivedTypesConfig,
-            supportsDeepCloning && MapperConfiguration.Mapper.UseDeepCloning,
-            MapperConfiguration.StackCloningStrategy,
-            MapperConfiguration.SupportedFeatures
+            supportsDeepCloning && mapperConfiguration.Mapper.UseDeepCloning,
+            mapperConfiguration.StackCloningStrategy,
+            mapperConfiguration.SupportedFeatures
         );
 
         configuration = IncludeConfigurations(configuration, visitedMethods, reference, supportsDeepCloning);
         _resolvedConfigurations[reference] = configuration;
+        return configuration;
+    }
+
+    private MappingConfiguration BuildMapperConfiguration(ISymbol mapperSymbol, MapperConfiguration defaultMapperConfiguration)
+    {
+        var mapperConfiguration = _dataAccessor.AccessSingle<MapperAttribute, MapperConfiguration>(mapperSymbol);
+        var mapper = MapperConfigurationMerger.MergeToAttribute(mapperConfiguration, defaultMapperConfiguration);
+
+        return new MappingConfiguration(
+            mapper,
+            new EnumMappingConfiguration(
+                mapper.EnumMappingStrategy,
+                mapper.EnumMappingIgnoreCase,
+                null,
+                [],
+                [],
+                [],
+                mapper.RequiredEnumMappingStrategy,
+                mapper.EnumNamingStrategy
+            ),
+            new MembersMappingConfiguration([], [], [], [], [], mapper.IgnoreObsoleteMembersStrategy, mapper.RequiredMappingStrategy),
+            [],
+            mapper.UseDeepCloning,
+            mapper.StackCloningStrategy,
+            _supportedFeatures
+        );
+    }
+
+    /// <summary>
+    /// Resolves the mapper configuration which applies to the given mapping method.
+    /// A method declared in another mapper (e.g. an external mapping rebuilt in a queryable projection)
+    /// uses the effective configuration of its own mapper
+    /// (its <see cref="MapperAttribute"/> merged with the <see cref="MapperDefaultsAttribute"/> of its assembly).
+    /// </summary>
+    private MappingConfiguration MapperConfigurationFor(IMethodSymbol method)
+    {
+        var mapper = method.ContainingType;
+        if (SymbolEqualityComparer.Default.Equals(mapper, _mapperSymbol) || !_dataAccessor.HasAttribute<MapperAttribute>(mapper))
+            return MapperConfiguration;
+
+        if (_mapperConfigurations.TryGetValue(mapper, out var configuration))
+            return configuration;
+
+        // the MSBuild defaults of other assemblies are unknown,
+        // only their MapperDefaultsAttribute is considered
+        var defaultConfiguration = SymbolEqualityComparer.Default.Equals(mapper.ContainingAssembly, _mapperSymbol.ContainingAssembly)
+            ? _defaultMapperConfiguration
+            : _dataAccessor
+                .TryAccess<MapperDefaultsAttribute, MapperConfiguration>(mapper.ContainingAssembly.GetAttributes())
+                .FirstOrDefault()
+                ?? new MapperConfiguration();
+        configuration = BuildMapperConfiguration(mapper, defaultConfiguration);
+        _mapperConfigurations[mapper] = configuration;
         return configuration;
     }
 
@@ -212,10 +253,13 @@ public class MapperConfigurationReader
             .ToList();
     }
 
-    private MembersMappingConfiguration BuildMembersConfig(MappingConfigurationReference configRef)
+    private MembersMappingConfiguration BuildMembersConfig(
+        MappingConfigurationReference configRef,
+        MappingConfiguration mapperConfiguration
+    )
     {
         if (configRef.Method == null)
-            return MapperConfiguration.Members;
+            return mapperConfiguration.Members;
 
         var ignoreSourceMemberAttributes = _dataAccessor
             .Access<MapperIgnoreSourceAttribute, MapperIgnoreMemberConfiguration>(configRef.Method)
@@ -244,7 +288,7 @@ public class MapperConfigurationReader
         if (hasMemberConfigs && (configRef.Source.IsEnum() || configRef.Target.IsEnum()))
         {
             _diagnostics.ReportDiagnostic(DiagnosticDescriptors.MemberConfigurationOnNonMemberMapping, configRef.Method);
-            return MapperConfiguration.Members;
+            return mapperConfiguration.Members;
         }
 
         if (
@@ -254,7 +298,7 @@ public class MapperConfigurationReader
         )
         {
             _diagnostics.ReportDiagnostic(DiagnosticDescriptors.MemberConfigurationOnQueryableProjectionMapping, configRef.Method);
-            return MapperConfiguration.Members;
+            return mapperConfiguration.Members;
         }
 
         ReportMissingJustificationDiagnostics(ignoreSourceMemberAttributes, static x => x.Value);
@@ -281,10 +325,10 @@ public class MapperConfigurationReader
         );
     }
 
-    private EnumMappingConfiguration BuildEnumConfig(MappingConfigurationReference configRef)
+    private EnumMappingConfiguration BuildEnumConfig(MappingConfigurationReference configRef, MappingConfiguration mapperConfiguration)
     {
         if (configRef.Method == null)
-            return MapperConfiguration.Enum;
+            return mapperConfiguration.Enum;
 
         var configData = _dataAccessor.AccessFirstOrDefault<MapEnumAttribute, EnumConfiguration>(configRef.Method);
         var explicitMappings = _dataAccessor.Access<MapEnumValueAttribute, EnumValueMappingConfiguration>(configRef.Method).ToList();
@@ -307,18 +351,18 @@ public class MapperConfigurationReader
         if (hasEnumConfigs && !configRef.Source.IsEnum() && !configRef.Target.IsEnum())
         {
             _diagnostics.ReportDiagnostic(DiagnosticDescriptors.EnumConfigurationOnNonEnumMapping, configRef.Method);
-            return MapperConfiguration.Enum;
+            return mapperConfiguration.Enum;
         }
 
         return new EnumMappingConfiguration(
-            configData?.Strategy ?? MapperConfiguration.Enum.Strategy,
-            configData?.IgnoreCase ?? MapperConfiguration.Enum.IgnoreCase,
+            configData?.Strategy ?? mapperConfiguration.Enum.Strategy,
+            configData?.IgnoreCase ?? mapperConfiguration.Enum.IgnoreCase,
             configData?.FallbackValue,
             ignoredSources,
             ignoredTargets,
             explicitMappings,
-            requiredMapping ?? MapperConfiguration.Enum.RequiredMappingStrategy,
-            configData?.NamingStrategy ?? MapperConfiguration.Enum.NamingStrategy
+            requiredMapping ?? mapperConfiguration.Enum.RequiredMappingStrategy,
+            configData?.NamingStrategy ?? mapperConfiguration.Enum.NamingStrategy
         );
     }
 
